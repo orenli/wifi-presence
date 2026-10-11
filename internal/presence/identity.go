@@ -46,6 +46,19 @@ type namedStation struct {
 	attrs                      string
 }
 
+// associatedClient retains radio details for matching and roaming while the
+// MQTT inventory publishes only host metadata grouped by SSID.
+type associatedClient struct {
+	Interface string
+	Hostname  string
+	MAC       string
+	IPv4      []string
+	IPv6      []string
+	SSID      string
+	BSSID     string
+	Connected bool
+}
+
 // Identity state is separate from the legacy MAC trackers so existing topic
 // names, discovery IDs, debounce behavior and MAC configuration keep working.
 type identityTracker struct {
@@ -57,7 +70,8 @@ type identityTracker struct {
 	debounce          time.Duration
 	autodiscovery     bool
 	configured        map[string]*namedStation
-	observed          map[string]hass.InventoryClient
+	observed          map[string]associatedClient
+	ssids             map[string]bool
 	hints             map[string]openwrt.HostHint
 	complete          bool
 	snapshotRemaining int
@@ -153,7 +167,7 @@ func (t *identityTracker) addLocked(hap hap, value string) error {
 	if err := mac.Decode(value); err != nil {
 		return err
 	}
-	client := hass.InventoryClient{
+	client := associatedClient{
 		Interface: hap.client.InterfaceName(), MAC: mac.String(),
 		SSID: hap.status.SSID, BSSID: hap.status.BSSID, Connected: true,
 		IPv4: []string{}, IPv6: []string{},
@@ -163,7 +177,7 @@ func (t *identityTracker) addLocked(hap hap, value string) error {
 	return nil
 }
 
-func (t *identityTracker) enrichLocked(client *hass.InventoryClient) {
+func (t *identityTracker) enrichLocked(client *associatedClient) {
 	if hint, exists := t.hints[strings.ToLower(client.MAC)]; exists {
 		if hint.Name != "" {
 			client.Hostname = hint.Name
@@ -250,8 +264,8 @@ func (t *identityTracker) refresh(ctx context.Context) error {
 	return t.reconcileLocked(ctx, time.Now())
 }
 
-func (t *identityTracker) clientsLocked() []hass.InventoryClient {
-	clients := make([]hass.InventoryClient, 0, len(t.observed))
+func (t *identityTracker) clientsLocked() []associatedClient {
+	clients := make([]associatedClient, 0, len(t.observed))
 	for _, client := range t.observed {
 		clients = append(clients, client)
 	}
@@ -266,8 +280,8 @@ func (t *identityTracker) clientsLocked() []hass.InventoryClient {
 
 // matchHostname preserves observations on multiple BSSs, but distinguishes
 // different MACs sharing a name. Ambiguous names must never bind silently.
-func matchHostname(hostname string, clients []hass.InventoryClient) (*hass.InventoryClient, bool) {
-	var selected *hass.InventoryClient
+func matchHostname(hostname string, clients []associatedClient) (*associatedClient, bool) {
+	var selected *associatedClient
 	for i := range clients {
 		if normalizedHostname(clients[i].Hostname) != normalizedHostname(hostname) {
 			continue
@@ -335,7 +349,7 @@ func (t *identityTracker) reconcileLocked(ctx context.Context, now time.Time) er
 			station.attrs = string(payload)
 		}
 	}
-	inventory := hass.ClientInventory{APName: t.apName, Complete: t.complete, LookupError: t.lookupError, Clients: clients}
+	inventory := t.inventoryLocked(clients)
 	payload, err := json.Marshal(inventory)
 	if err != nil {
 		return err
@@ -347,4 +361,33 @@ func (t *identityTracker) reconcileLocked(ctx context.Context, now time.Time) er
 		t.lastInventory = string(payload)
 	}
 	return nil
+}
+
+func (t *identityTracker) inventoryLocked(clients []associatedClient) hass.ClientInventory {
+	groups := make(map[string][]hass.InventoryClient, len(t.ssids))
+	for ssid := range t.ssids {
+		groups[ssid] = []hass.InventoryClient{}
+	}
+	ids := make(map[string][]string)
+	for id, station := range t.configured {
+		client, ambiguous := matchHostname(station.config.Hostname, clients)
+		if client != nil && !ambiguous {
+			mac := strings.ToLower(client.MAC)
+			ids[mac] = append(ids[mac], id)
+		}
+	}
+	for _, client := range clients {
+		id := ""
+		if matches := ids[strings.ToLower(client.MAC)]; len(matches) == 1 {
+			id = matches[0]
+		}
+		groups[client.SSID] = append(groups[client.SSID], hass.InventoryClient{
+			ID: id, Hostname: client.Hostname, MAC: client.MAC,
+			IPv4: append([]string{}, client.IPv4...), IPv6: append([]string{}, client.IPv6...),
+		})
+	}
+	for _, hosts := range groups {
+		sort.SliceStable(hosts, func(i, j int) bool { return hosts[i].MAC < hosts[j].MAC })
+	}
+	return hass.ClientInventory{StartupComplete: t.complete, LookupError: t.lookupError, Clients: groups}
 }

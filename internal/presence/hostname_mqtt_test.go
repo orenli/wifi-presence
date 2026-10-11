@@ -65,7 +65,13 @@ func TestHostnameMQTTRotationAndRetainedInventory(t *testing.T) {
 		}
 		return value
 	}
-	if got := readInventory(); len(got.Clients) != 1 || got.Clients[0].Hostname != "oren-phone" {
+	got := readInventory()
+	// State can arrive before the config handler finishes publishing the
+	// updated inventory. A late subscriber may first receive the prior snapshot.
+	for len(got.Clients["Home"]) == 0 || got.Clients["Home"][0].ID != "phone" {
+		got = readInventory()
+	}
+	if len(got.Clients["Home"]) != 1 || got.Clients["Home"][0].Hostname != "oren-phone" {
 		t.Fatalf("retained inventory: %+v", got)
 	}
 	select {
@@ -73,7 +79,7 @@ func TestHostnameMQTTRotationAndRetainedInventory(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("disconnect event timeout")
 	}
-	if got := readInventory(); len(got.Clients) != 0 {
+	if got := readInventory(); len(got.Clients["Home"]) != 0 {
 		t.Fatalf("disconnected client stayed in inventory: %+v", got)
 	}
 	select {
@@ -81,7 +87,7 @@ func TestHostnameMQTTRotationAndRetainedInventory(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("connect event timeout")
 	}
-	if got := readInventory(); len(got.Clients) != 1 || got.Clients[0].MAC != newMAC {
+	if got := readInventory(); len(got.Clients["Home"]) != 1 || got.Clients["Home"][0].MAC != newMAC {
 		t.Fatalf("rotated MAC inventory: %+v", got)
 	}
 	attributes := daemon.subTopic(daemon.topics.DeviceJSONAttrs("id-phone"), false)

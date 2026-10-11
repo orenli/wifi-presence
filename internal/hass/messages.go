@@ -73,19 +73,15 @@ type Availability struct {
 
 // ClientInventory includes every observed association, including untracked clients.
 type ClientInventory struct {
-	APName      string            `json:"ap_name"`
-	Complete    bool              `json:"complete"`
-	LookupError string            `json:"hostname_lookup_error,omitempty"`
-	Clients     []InventoryClient `json:"clients"`
+	StartupComplete bool                         `json:"startup_complete"`
+	LookupError     string                       `json:"hostname_lookup_error,omitempty"`
+	Clients         map[string][]InventoryClient `json:"clients"`
 }
 
 type InventoryClient struct {
-	Interface string   `json:"interface"`
-	Hostname  string   `json:"hostname"`
-	MAC       string   `json:"mac"`
-	IPv4      []string `json:"ipv4"`
-	IPv6      []string `json:"ipv6"`
-	SSID      string   `json:"ssid"`
-	BSSID     string   `json:"bssid"`
-	Connected bool     `json:"connected"`
+	ID       string   `json:"id,omitempty"`
+	Hostname string   `json:"hostname"`
+	MAC      string   `json:"mac"`
+	IPv4     []string `json:"ipv4"`
+	IPv6     []string `json:"ipv6"`
 }

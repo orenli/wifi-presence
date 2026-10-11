@@ -66,7 +66,7 @@ func TestStableHostnameDiscoveryAndLegacyIdentity(t *testing.T) {
 	if msg.topic != "homeassistant/device_tracker/ap/aa-bb-cc-dd-ee-ff/config" || tracker.UniqueID != "wifipresence_aabbccddeeff_ap" || tracker.AvailabilityTopic != "wifi-presence/ap/status" {
 		t.Fatalf("legacy identity changed: %+v", tracker)
 	}
-	if err := m.Clients(ctx, ClientInventory{APName: "AP", Clients: []InventoryClient{}}); err != nil {
+	if err := m.Clients(ctx, ClientInventory{StartupComplete: true, Clients: map[string][]InventoryClient{"Home": {}}}); err != nil {
 		t.Fatal(err)
 	}
 	if client.messages[2].topic != "wifi-presence/ap/clients" || !client.messages[2].retained {

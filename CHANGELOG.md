@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 ### Fixed
 - Join uppercase hostapd MAC observations with lowercase OpenWrt host-hint keys so hostnames and IP addresses populate correctly.
+### Changed
+- Group client inventory by SSID, rename the snapshot flag to startup_complete, omit redundant radio/connection fields, and include configured IDs on uniquely matched hosts.
 ### Added
 - OpenWrt hostname selectors with stable configured IDs, DHCP-aware matching, and duplicate-name availability handling.
 - Retained per-AP client inventory including untracked devices, hostnames, MACs, IPs and interfaces.

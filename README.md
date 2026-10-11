@@ -147,37 +147,53 @@ restores availability. These matches provide presence convenience, not an
 authenticated device identity.
 
 A retained inventory is published on `<PREFIX>/<AP_NAME>/clients`, including
-untracked clients and each observed interface:
+untracked clients grouped under their SSIDs:
 
 ```json
 {
-  "ap_name": "my-router",
-  "complete": true,
-  "clients": [
-    {
-      "interface": "phy1-ap0",
-      "hostname": "oren-iphone",
-      "mac": "d0:e7:82:ce:1a:18",
-      "ipv4": ["192.168.1.42"],
-      "ipv6": [],
-      "ssid": "Home",
-      "bssid": "aa:bb:cc:dd:ee:ff",
-      "connected": true
-    }
-  ]
+  "startup_complete": true,
+  "clients": {
+    "Home 2.4G": [
+      {
+        "id": "oren-phone",
+        "hostname": "oren-iphone",
+        "mac": "D0:E7:82:CE:1A:18",
+        "ipv4": ["192.168.1.42"],
+        "ipv6": []
+      }
+    ],
+    "Home 5G": []
+  }
 }
 ```
 
-Only associated clients appear in `clients`; disconnections remove entries and
-an empty AP publishes `"clients": []`. Snapshots are sorted by interface and
-MAC, and published on change. Unknown hostnames are empty strings. The
-`hostname_lookup_error` field reports lookup failures when present.
-`complete` describes whether the initial association snapshot succeeded.
+Only associated clients appear in these lists; disconnections remove entries.
+Every monitored SSID remains present with an empty array when it has no clients.
+Hosts are sorted by MAC within each SSID, and snapshots publish on change.
+Unknown hostnames are empty strings, and absent IP addresses are empty arrays.
+A host's optional `id` is populated only when exactly one configured hostname
+tracker uniquely matches that host. Untracked clients, ambiguous hostname
+matches, MAC-only trackers and clients matching multiple configured IDs omit it.
+IDs are never invented from MAC addresses or hostnames.
+
+Interface, BSSID, per-host SSID, `connected`, and `ap_name` fields are omitted
+from the inventory. Interface and BSSID remain in internal association records
+for roaming and in tracked-device attributes. Separate associations of the same
+MAC are preserved, so simultaneous observations on multiple interfaces can
+appear as repeated host entries within an SSID.
+
+`startup_complete` describes whether the initial association snapshot succeeded
+for every monitored interface, not whether every hostname resolved.
 Stripped-down hostapd builds use local `ubus hostapd.<interface> get_clients` for
-that snapshot. If neither snapshot method works, `complete` is false and the
-inventory starts accumulating clients from subsequent events. Consumers should
-also check `<PREFIX>/<AP_NAME>/status`: a retained inventory is historical while
-the daemon is offline.
+that snapshot. If neither snapshot method works, `startup_complete` is false and
+the inventory starts accumulating clients from subsequent events. The optional
+`hostname_lookup_error` field reports lookup failures. Consumers should also
+check `<PREFIX>/<AP_NAME>/status`: a retained inventory is historical while the
+daemon is offline.
+
+This replaces the earlier development schema (`clients` as a flat array and
+`complete` as the startup flag). The topic path is unchanged; inventory consumers
+must read `clients[SSID]` and `startup_complete`.
 
 Hostname-selected devices use `id-<ID>` in discovery, state and attribute topic
 paths, for example `wifi-presence/station/my-router/id-oren-phone/state`. The

@@ -141,9 +141,13 @@ func NewDaemon(opts ...Opt) (*Daemon, error) {
 	d.identities = &identityTracker{
 		publisher: d.hass, source: d.hostSource, logger: d.logger, apName: d.apName,
 		debounce: d.db.debounce, autodiscovery: d.hassAutoDisc,
-		configured: make(map[string]*namedStation), observed: make(map[string]hass.InventoryClient),
+		configured: make(map[string]*namedStation), observed: make(map[string]associatedClient),
+		ssids:             make(map[string]bool),
 		hints:             make(map[string]openwrt.HostHint),
 		snapshotRemaining: len(d.haps),
+	}
+	for _, ap := range d.haps {
+		d.identities.ssids[ap.status.SSID] = true
 	}
 
 	return &d, nil
