@@ -22,6 +22,14 @@ func (m *MQTTTopics) Config() string {
 	return mkTopic(m.Prefix, "config")
 }
 
+func (m *MQTTTopics) Clients() string {
+	return mkTopic(m.Prefix, sanitizeTopic(m.Name), "clients")
+}
+
+func (m *MQTTTopics) DeviceAvailability(key string) string {
+	return mkTopic(m.Prefix, "station", sanitizeTopic(m.Name), sanitizeMACTopic(key), "availability")
+}
+
 // DeviceDiscovery topic for Home Assistant device tracker configuration.
 func (m *MQTTTopics) DeviceDiscovery(mac string) string {
 	// https://www.home-assistant.io/docs/mqtt/discovery/#discovery-topic

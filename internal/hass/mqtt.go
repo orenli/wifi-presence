@@ -156,6 +156,7 @@ func (m *MQTT) publishStatus(ctx context.Context, status string) error {
 type Discovery struct {
 	Name string
 	MAC  string
+	ID   string
 }
 
 var hassObjectIDRe = regexp.MustCompile(`[^a-zA-Z0-9_-]+`)
@@ -163,10 +164,13 @@ var hassObjectIDRe = regexp.MustCompile(`[^a-zA-Z0-9_-]+`)
 // RegisterDeviceTracker publishes a message for Home Assistant to start tracking
 // the defined device.
 func (m *MQTT) RegisterDeviceTracker(ctx context.Context, dsc Discovery) error {
+	if dsc.ID != "" && (hassObjectIDRe.MatchString(dsc.ID) || dsc.MAC != "") {
+		return errors.New("invalid Discovery; ID must be a topic-safe identifier without MAC")
+	}
 	if dsc.Name == "" {
 		return errors.New("invalid Discovery; Name cannot be blank")
 	}
-	if dsc.MAC == "" {
+	if dsc.MAC == "" && dsc.ID == "" {
 		return errors.New("invalid Discovery; MAC cannot be blank")
 	}
 
@@ -197,6 +201,20 @@ func (m *MQTT) RegisterDeviceTracker(ctx context.Context, dsc Discovery) error {
 		StateTopic:          m.topics.DeviceState(dsc.MAC),
 		UniqueID:            fmt.Sprintf("wifipresence_%s", deviceID),
 	}
+	if dsc.ID != "" {
+		key := "id-" + strings.ToLower(dsc.ID)
+		deviceID := key + "_" + sanitizeTopic(m.apName)
+		dt.Device = Device{Name: dsc.Name, Identifiers: []string{"wifipresence_" + deviceID}, ViaDevice: m.apName}
+		dt.AvailabilityTopic = ""
+		dt.Availability = []Availability{{Topic: m.topics.Will()}, {Topic: m.topics.DeviceAvailability(key)}}
+		dt.AvailabilityMode = "all"
+		dt.StateTopic = m.topics.DeviceState(key)
+		dt.JSONAttributesTopic = m.topics.DeviceJSONAttrs(key)
+		dt.ObjectID = ""
+		dt.DefaultEntityID = "device_tracker." + strings.ReplaceAll(strings.ToLower(dsc.ID)+"_"+sanitizeTopic(m.apName), "-", "_")
+		dt.UniqueID = "wifipresence_" + deviceID
+		dsc.MAC = key
+	}
 	payload, err := json.Marshal(dt)
 	if err != nil {
 		return err
@@ -204,6 +222,34 @@ func (m *MQTT) RegisterDeviceTracker(ctx context.Context, dsc Discovery) error {
 
 	tkn := m.c.Publish(m.topics.DeviceDiscovery(dsc.MAC), qosExactlyOnce, true, payload)
 	return tokenWait(ctx, tkn, "publish station discovery")
+}
+
+// Clients publishes a retained, deterministic inventory snapshot for this AP.
+func (m *MQTT) Clients(ctx context.Context, inventory ClientInventory) error {
+	payload, err := json.Marshal(inventory)
+	if err != nil {
+		return err
+	}
+	return tokenWait(ctx, m.c.Publish(m.topics.Clients(), qosAtLeastOnce, true, payload), "publish client inventory")
+}
+
+// DeviceAvailable marks hostname matching as usable or ambiguous.
+func (m *MQTT) DeviceAvailable(ctx context.Context, key string, available bool) error {
+	status := StatusOffline
+	if available {
+		status = StatusOnline
+	}
+	return tokenWait(ctx, m.c.Publish(m.topics.DeviceAvailability(key), qosAtLeastOnce, true, status), "publish device availability")
+}
+
+// ClearStation removes retained data when a hostname-selected device is removed.
+func (m *MQTT) ClearStation(ctx context.Context, key string) error {
+	for _, topic := range []string{m.topics.DeviceState(key), m.topics.DeviceJSONAttrs(key), m.topics.DeviceAvailability(key)} {
+		if err := tokenWait(ctx, m.c.Publish(topic, qosAtLeastOnce, true, []byte{}), "clear station"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // UnregisterDeviceTracker publishes a message for Home Assistant to stop tracking

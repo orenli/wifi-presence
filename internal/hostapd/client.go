@@ -50,6 +50,9 @@ type Client struct {
 	ctrl         *ctrl
 }
 
+// InterfaceName returns the interface associated with this control socket.
+func (c *Client) InterfaceName() string { return path.Base(c.ctrlSock) }
+
 // Close closes the connection to the control interface. The client
 // is no longer usable after closing.
 func (c *Client) Close() error {
@@ -97,6 +100,13 @@ func (c *Client) Stations() ([]Station, error) {
 // or the provided context is canceled. Any error returned from the provided
 // callback will stop attach and be returned.
 func (c *Client) Attach(ctx context.Context, events func(Event) error) error {
+	return c.AttachWithReady(ctx, events, nil)
+}
+
+// AttachWithReady invokes ready after hostapd acknowledges ATTACH. It allows
+// callers to snapshot associations while subsequent events queue on the socket.
+// The ready callback must use the client's separate command connection.
+func (c *Client) AttachWithReady(ctx context.Context, events func(Event) error, ready func() error) error {
 	// Create a separate socket local to this method. This allows
 	// the Client's main socket to still be used while attach is in use.
 
@@ -119,7 +129,7 @@ func (c *Client) Attach(ctx context.Context, events func(Event) error) error {
 		return err
 	}
 
-	return ctrl.attach(ctx, events)
+	return ctrl.attach(ctx, events, ready)
 }
 
 // isValidSocketPath returns an error if the given path is invalid for a
