@@ -45,7 +45,7 @@ func newCtrl(cn *conn, rTimeout, wTimeout time.Duration) (*ctrl, error) {
 		conn:         cn,
 		// It's unclear what the correct size to make this buffer is.
 		// See <https://github.com/awilliams/wifi-presence/issues/30> for details.
-		buf:          make([]byte, 4*1024),
+		buf: make([]byte, 4*1024),
 	}
 	if err := c.ping(); err != nil {
 		return nil, fmt.Errorf("ping error: %w", err)
@@ -157,7 +157,7 @@ func (c *ctrl) stationNext(mac string) (Station, bool, error) {
 // event messages. These include station connection and disconnect events.
 // This method blocks until the context is canceled or an error occurs.
 // While this method is blocking, no other ctrl methods can be used.
-func (c *ctrl) attach(ctx context.Context, cb func(Event) error) error {
+func (c *ctrl) attach(ctx context.Context, cb func(Event) error, ready ...func() error) error {
 	err := c.cmd(cmdAttach, func(resp []byte) error {
 		if s := strings.TrimSpace(string(resp)); s != respAttach {
 			return fmt.Errorf("unexpected response to %s: %q", cmdAttach, s)
@@ -195,6 +195,13 @@ func (c *ctrl) attach(ctx context.Context, cb func(Event) error) error {
 	}
 
 	// Read and process unsolicited messages.
+	for _, callback := range ready {
+		if callback != nil {
+			if err := callback(); err != nil {
+				return err
+			}
+		}
+	}
 
 	var msg string
 	for {

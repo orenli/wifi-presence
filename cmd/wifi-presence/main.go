@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"log"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/awilliams/wifi-presence/internal/hass"
 	"github.com/awilliams/wifi-presence/internal/hostapd"
+	"github.com/awilliams/wifi-presence/internal/openwrt"
 	"github.com/awilliams/wifi-presence/internal/presence"
 
 	"golang.org/x/sync/errgroup"
@@ -49,6 +51,13 @@ along with -hass.prefix for Home Assistant's topic prefix.
 The provided -apName is also used as part of some topics.
 It will be modified for compatibility with MQTT topics
 (downcased, spaces removed, etc).
+
+Hostname matching:
+On OpenWrt, a device can be configured with id, name and hostname instead of mac.
+Local ubus host hints and dnsmasq leases resolve names; hostapd events determine
+presence. A retained client inventory is published on <PREFIX>/<AP_NAME>/clients.
+Hostname selectors use id-<ID> in discovery/state/attribute paths and publish an
+additional /availability topic for ambiguous hostnames. See README.md for details.
 
 The following topics are used:
 
@@ -98,7 +107,11 @@ func run(ctx context.Context, appName string) error {
 	// Parse and validate program arguments.
 
 	hostName, _ := os.Hostname()
+	_, ubusErr := exec.LookPath("ubus")
 	args := struct {
+		openwrt           bool
+		hintInterval      time.Duration
+		leaseFile         string
 		apName            string
 		sockDir           string
 		hostapdSocks      string
@@ -115,8 +128,11 @@ func run(ctx context.Context, appName string) error {
 		version  bool
 		moreHelp bool
 	}{
-		apName:  hostName,
-		sockDir: os.TempDir(),
+		openwrt:      ubusErr == nil,
+		hintInterval: 5 * time.Second,
+		leaseFile:    "/tmp/dhcp.leases",
+		apName:       hostName,
+		sockDir:      os.TempDir(),
 		hostapdSocks: func() string {
 			return strings.Join(
 				findUnixSockets(defaultHostapdSockDir),
@@ -139,6 +155,9 @@ func run(ctx context.Context, appName string) error {
 	}
 
 	flag.StringVar(&args.apName, "apName", args.apName, "Access point name")
+	flag.BoolVar(&args.openwrt, "openwrt", args.openwrt, "Enable local OpenWrt hostname lookup (automatic when ubus is installed)")
+	flag.DurationVar(&args.hintInterval, "openwrt.interval", args.hintInterval, "Hostname refresh and hostname departure check interval")
+	flag.StringVar(&args.leaseFile, "openwrt.leases", args.leaseFile, "dnsmasq lease file used to enrich OpenWrt host hints")
 	flag.StringVar(&args.sockDir, "sockDir", args.sockDir, "Directory for local socket(s)")
 	flag.StringVar(&args.hostapdSocks, "hostapd.socks", args.hostapdSocks, fmt.Sprintf("Hostapd control interface socket(s). Separate multiple paths by %q", os.PathListSeparator))
 	flag.StringVar(&args.mqttAddr, "mqtt.addr", args.mqttAddr, "MQTT broker address, e.g \"tcp://mqtt.broker:1883\"")
@@ -174,6 +193,9 @@ func run(ctx context.Context, appName string) error {
 
 	if args.apName == "" {
 		return errors.New("apName cannot be blank")
+	}
+	if args.hintInterval <= 0 {
+		return errors.New("openwrt.interval must be positive")
 	}
 	if args.hostapdSocks == "" {
 		return errors.New("hostapd.socks cannot be blank")
@@ -249,6 +271,9 @@ func run(ctx context.Context, appName string) error {
 	opts = append(opts, presence.WithLogger(log.Default()))
 	opts = append(opts, presence.WithDebounce(args.debounce))
 	opts = append(opts, presence.WithHASSAutodiscovery(args.hassAutodiscovery))
+	if args.openwrt {
+		opts = append(opts, presence.WithHostSource(openwrt.Source{LeaseFile: args.leaseFile}, args.hintInterval))
+	}
 	for _, hap := range hostapds {
 		opts = append(opts, presence.WithHostAPD(hap))
 	}

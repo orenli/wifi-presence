@@ -99,6 +99,106 @@ $ mosquitto_pub \
         -f wifi-presence.config.json
 ```
 
+## Hostname matching and client inventory
+
+On OpenWrt, hostnames can be used instead of fixed MAC addresses. A configured
+`id` keeps the Home Assistant discovery identity and MQTT topics stable even
+when the phone uses a different private MAC address:
+
+```json
+{
+  "devices": [
+    {"id": "oren-phone", "name": "Oren's phone", "hostname": "oren-iphone"},
+    {"name": "TV", "mac": "00:11:22:33:44:55"}
+  ]
+}
+```
+
+Publish this JSON as a retained message on `wifi-presence/config`, as with the
+existing MAC configuration. Each entry must select either `hostname` or `mac`.
+Hostname entries require a nonempty `name` and a unique `id` containing only
+letters, numbers, underscores or hyphens; IDs are normalized to lowercase.
+MAC entries keep their existing discovery IDs and topics and do not use `id`.
+Hostname matching is exact, ignoring case and a final DNS dot. It does not strip
+a domain suffix: `phone` and `phone.lan` are distinct names. The phone must
+advertise a stable, distinct hostname; this does not identify an unnamed device.
+
+OpenWrt support is enabled automatically when `ubus` is installed. It uses local
+`ubus call luci-rpc getHostHints` and active dnsmasq leases, with the advertised
+DHCP hostname preferred over an inferred DNS name. The default lease file is
+`/tmp/dhcp.leases`. No HTTP router login is needed. If the LuCI host-hint method
+is unavailable, active local leases still provide names. Bridged APs without
+local leases or useful host hints may have no hostname information.
+
+Hostapd connect/disconnect events remain the presence source. Leases supply
+metadata and never make a disconnected client present. Hostnames refresh every
+five seconds so a DHCP lease arriving after Wi-Fi association can identify an
+already-connected phone. Existing names are kept during a lookup failure or
+missing hint while the association remains active. Departure uses the configured
+`-debounce` grace period, checked on each refresh; actual departure notification
+may occur up to one refresh interval after that grace period. Reconnection with
+a matching hostname cancels the pending departure even if its MAC changed.
+
+If two currently associated MACs advertise the same configured hostname, the
+tracker becomes **unavailable** and its `match_status` attribute is `ambiguous`.
+The full inventory retains both clients. Multiple observations of the same MAC
+on different interfaces do not create an ambiguity. A unique match automatically
+restores availability. These matches provide presence convenience, not an
+authenticated device identity.
+
+A retained inventory is published on `<PREFIX>/<AP_NAME>/clients`, including
+untracked clients and each observed interface:
+
+```json
+{
+  "ap_name": "my-router",
+  "complete": true,
+  "clients": [
+    {
+      "interface": "phy1-ap0",
+      "hostname": "oren-iphone",
+      "mac": "d0:e7:82:ce:1a:18",
+      "ipv4": ["192.168.1.42"],
+      "ipv6": [],
+      "ssid": "Home",
+      "bssid": "aa:bb:cc:dd:ee:ff",
+      "connected": true
+    }
+  ]
+}
+```
+
+Only associated clients appear in `clients`; disconnections remove entries and
+an empty AP publishes `"clients": []`. Snapshots are sorted by interface and
+MAC, and published on change. Unknown hostnames are empty strings. The
+`hostname_lookup_error` field reports lookup failures when present.
+`complete` describes whether the initial association snapshot succeeded.
+Stripped-down hostapd builds use local `ubus hostapd.<interface> get_clients` for
+that snapshot. If neither snapshot method works, `complete` is false and the
+inventory starts accumulating clients from subsequent events. Consumers should
+also check `<PREFIX>/<AP_NAME>/status`: a retained inventory is historical while
+the daemon is offline.
+
+Hostname-selected devices use `id-<ID>` in discovery, state and attribute topic
+paths, for example `wifi-presence/station/my-router/id-oren-phone/state`. The
+additional `/availability` topic is combined with daemon availability so name
+ambiguity and router downtime both make the HA entity unavailable. State payloads
+are `connected` and `not_connected`, translated to `home` and `not_home` by the
+HA discovery configuration. Current MAC, hostname and IPs are attributes. Removing
+a hostname device clears its retained state, attributes and matcher availability.
+
+Additional command-line options:
+
+* `-openwrt=true|false`: enable or disable local host lookup (automatic by default).
+* `-openwrt.interval=5s`: hostname refresh and departure check interval.
+* `-openwrt.leases=/tmp/dhcp.leases`: custom dnsmasq lease file.
+
+The existing OpenWrt init script can use the automatic defaults without changes.
+For custom settings, append these flags to its `procd` command. A jailed service
+needs access to the local ubus socket and lease file as well as the existing
+hostapd control sockets. Ensure the service user can read the lease file and
+invoke the required ubus methods.
+
 ## OpenWrt
 
 The [OpenWrt](https://openwrt.org/about) project is

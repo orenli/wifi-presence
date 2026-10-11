@@ -544,6 +544,10 @@ func TestDaemon_DelayedDisconnect(t *testing.T) {
 }
 
 func newDaemonTest(t *testing.T, hapHandlers ...*hostapdtest.Handler) *daemonTest {
+	return newDaemonTestWithOptions(t, nil, hapHandlers...)
+}
+
+func newDaemonTestWithOptions(t *testing.T, options []Opt, hapHandlers ...*hostapdtest.Handler) *daemonTest {
 	if *mqttAddr == "" {
 		t.Skip("skipping test; not given mqttAddr")
 	}
@@ -623,6 +627,7 @@ func newDaemonTest(t *testing.T, hapHandlers ...*hostapdtest.Handler) *daemonTes
 	daemonOpts = append(daemonOpts, WithHassOpt(hm))
 	daemonOpts = append(daemonOpts, WithDebounce(0)) // Handle disconnect events immediately.
 	daemonOpts = append(daemonOpts, WithHASSAutodiscovery(true))
+	daemonOpts = append(daemonOpts, options...)
 	d, err := NewDaemon(daemonOpts...)
 	if err != nil {
 		t.Fatal(err)

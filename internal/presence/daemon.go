@@ -12,6 +12,7 @@ import (
 
 	"github.com/awilliams/wifi-presence/internal/hass"
 	"github.com/awilliams/wifi-presence/internal/hostapd"
+	"github.com/awilliams/wifi-presence/internal/openwrt"
 
 	"golang.org/x/sync/errgroup"
 )
@@ -67,6 +68,9 @@ func WithHASSAutodiscovery(ad bool) Opt {
 
 // Daemon runs the main wifi-presence program loop.
 type Daemon struct {
+	hostSource   HostSource
+	hintInterval time.Duration
+	identities   *identityTracker
 	apName       string
 	hass         *hass.MQTT
 	haps         []hap
@@ -131,6 +135,16 @@ func NewDaemon(opts ...Opt) (*Daemon, error) {
 	if d.db == nil {
 		d.db = newDebouncer(5 * time.Second)
 	}
+	if d.hintInterval <= 0 {
+		d.hintInterval = 5 * time.Second
+	}
+	d.identities = &identityTracker{
+		publisher: d.hass, source: d.hostSource, logger: d.logger, apName: d.apName,
+		debounce: d.db.debounce, autodiscovery: d.hassAutoDisc,
+		configured: make(map[string]*namedStation), observed: make(map[string]hass.InventoryClient),
+		hints:             make(map[string]openwrt.HostHint),
+		snapshotRemaining: len(d.haps),
+	}
 
 	return &d, nil
 }
@@ -153,30 +167,66 @@ func (d *Daemon) Run(ctx context.Context) error {
 		}
 	})
 
-	// Watch for configuration updates.
+	ready := make(chan struct{}, len(d.haps))
+
+	// Watch each hostapd for events.
+	for _, ap := range d.haps {
+		d.logger.Printf("Connected to AP\n  SSID: %q\n  BSSID: %q\n  CHANNEL: %02d\n  STATE: %q\n",
+			ap.status.SSID,
+			ap.status.BSSID,
+			ap.status.Channel,
+			ap.status.State,
+		)
+
+		ap := ap
+		eg.Go(func() error {
+			return ap.client.AttachWithReady(ctx, func(event hostapd.Event) error {
+				return d.onHostapdEvent(ctx, ap, event, errs)
+			}, func() error {
+				d.identities.seed(ctx, []hap{ap})
+				ready <- struct{}{}
+				return nil
+			})
+		})
+	}
+	// Subscribe before snapshotting so events during startup cannot be lost.
+	for range d.haps {
+		select {
+		case <-ready:
+		case <-ctx.Done():
+			return eg.Wait()
+		}
+	}
+	metadataReady := make(chan struct{})
 	eg.Go(func() error {
+		if err := d.identities.refresh(ctx); err != nil {
+			return err
+		}
+		close(metadataReady)
+		ticker := time.NewTicker(d.hintInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-ticker.C:
+				if err := d.identities.refresh(ctx); err != nil {
+					return err
+				}
+			}
+		}
+	})
+	eg.Go(func() error {
+		select {
+		case <-metadataReady:
+		case <-ctx.Done():
+			return nil
+		}
 		d.logger.Printf("Subscribed to config topic: %q", d.hass.ConfigTopic())
 		return d.hass.SubscribeConfig(ctx, func(retained bool, cfg hass.Configuration) error {
 			return d.onConfigChange(ctx, retained, cfg)
 		})
 	})
-
-	// Watch each hostapd for events.
-	for _, hap := range d.haps {
-		d.logger.Printf("Connected to AP\n  SSID: %q\n  BSSID: %q\n  CHANNEL: %02d\n  STATE: %q\n",
-			hap.status.SSID,
-			hap.status.BSSID,
-			hap.status.Channel,
-			hap.status.State,
-		)
-
-		hap := hap
-		eg.Go(func() error {
-			return hap.client.Attach(ctx, func(event hostapd.Event) error {
-				return d.onHostapdEvent(ctx, hap, event, errs)
-			})
-		})
-	}
 
 	return eg.Wait()
 }
@@ -206,6 +256,17 @@ func (s staChange) String() string {
 }
 
 func (d *Daemon) onConfigChange(ctx context.Context, retained bool, cfg hass.Configuration) error {
+	legacy, named, err := splitConfiguration(cfg, d.hostSource != nil)
+	if err != nil {
+		return err
+	}
+	if err := d.onMACConfigChange(ctx, retained, legacy); err != nil {
+		return err
+	}
+	return d.identities.configure(ctx, named)
+}
+
+func (d *Daemon) onMACConfigChange(ctx context.Context, retained bool, cfg hass.Configuration) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -370,6 +431,9 @@ func (d *Daemon) onConfigChange(ctx context.Context, retained bool, cfg hass.Con
 }
 
 func (d *Daemon) onHostapdEvent(ctx context.Context, hap hap, event hostapd.Event, errs chan<- error) error {
+	if err := d.identities.event(ctx, hap, event); err != nil {
+		return err
+	}
 	d.logger.Printf("%s: Event %T: %q", hap.status.SSID, event, event.Raw())
 
 	switch e := event.(type) {
