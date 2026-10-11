@@ -6,6 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Fixed
+- Use default_entity_id for hostname trackers on current Home Assistant and expose configured IDs in tracker attributes.
 - Join uppercase hostapd MAC observations with lowercase OpenWrt host-hint keys so hostnames and IP addresses populate correctly.
 ### Changed
 - Group client inventory by SSID, rename the snapshot flag to startup_complete, omit redundant radio/connection fields, and include configured IDs on uniquely matched hosts.

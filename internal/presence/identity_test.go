@@ -95,6 +95,9 @@ func TestHostapdUppercaseMACJoinsLowercaseHostHints(t *testing.T) {
 	if !recorder.states["id-phone"] {
 		t.Fatal("uppercase observation failed to join lowercase resolver key")
 	}
+	if recorder.attrs["id-phone"].ID != "phone" {
+		t.Fatal("configured ID missing from Home Assistant attributes")
+	}
 	client := recorder.inventory.Clients["Home"][0]
 	if client.ID != "phone" || client.MAC != "D0:E7:82:CE:1A:18" || client.Hostname != "oren-phone" || len(client.IPv4) != 1 || len(client.IPv6) != 1 {
 		t.Fatalf("hostname/IP enrichment failed: %+v", client)

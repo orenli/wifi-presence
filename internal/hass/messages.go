@@ -21,6 +21,7 @@ type TrackConfig struct {
 
 // DeviceTracker is used to configure HomeAssistant to track a device.
 type DeviceTracker struct {
+	DefaultEntityID     string         `json:"default_entity_id,omitempty"`
 	Availability        []Availability `json:"availability,omitempty"`
 	AvailabilityMode    string         `json:"availability_mode,omitempty"`
 	AvailabilityTopic   string         `json:"availability_topic,omitempty"`    // The MQTT topic subscribed to receive availability (online/offline) updates.
@@ -50,6 +51,7 @@ type Device struct {
 
 // Attrs are a device's attributes.
 type Attrs struct {
+	ID              string     `json:"id,omitempty"`
 	Hostname        string     `json:"hostname,omitempty"`
 	IPv4            []string   `json:"ipv4,omitempty"`
 	IPv6            []string   `json:"ipv6,omitempty"`

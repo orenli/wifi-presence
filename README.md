@@ -200,8 +200,21 @@ paths, for example `wifi-presence/station/my-router/id-oren-phone/state`. The
 additional `/availability` topic is combined with daemon availability so name
 ambiguity and router downtime both make the HA entity unavailable. State payloads
 are `connected` and `not_connected`, translated to `home` and `not_home` by the
-HA discovery configuration. Current MAC, hostname and IPs are attributes. Removing
+HA discovery configuration. Configured ID, current MAC, hostname and IPs are attributes. Removing
 a hostname device clears its retained state, attributes and matcher availability.
+
+For hostname trackers, Home Assistant discovery supplies `default_entity_id`,
+for example `device_tracker.oren_phone_openwrt` for `id: oren-phone` on AP
+`OpenWrt`. Hyphens become underscores for the HA entity ID. Internal MQTT topic
+keys, discovery unique IDs and device identifiers remain stable. The configured
+ID is also exposed as an `id` entity attribute.
+
+Home Assistant uses `default_entity_id` only when an entity with this unique ID
+is first registered. Updating discovery does not rename an existing entity. For
+an existing tracker, edit its Entity ID in Home Assistant once to the desired
+value; no discovery deletion or recreation is needed. If the proposed entity ID
+is already used, Home Assistant may add a numeric suffix. See the
+[MQTT tracker documentation](https://www.home-assistant.io/integrations/device_tracker.mqtt/).
 
 Additional command-line options:
 

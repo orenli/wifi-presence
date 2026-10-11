@@ -308,7 +308,7 @@ func (t *identityTracker) reconcileLocked(ctx context.Context, now time.Time) er
 			}
 			station.available, station.hasAvailability = available, true
 		}
-		attrs := hass.Attrs{Name: station.config.Name, APName: t.apName, Hostname: station.config.Hostname, MatchStatus: "unmatched"}
+		attrs := hass.Attrs{ID: station.config.ID, Name: station.config.Name, APName: t.apName, Hostname: station.config.Hostname, MatchStatus: "unmatched"}
 		home := client != nil
 		if ambiguous {
 			attrs.MatchStatus = "ambiguous"

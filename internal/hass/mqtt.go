@@ -210,7 +210,8 @@ func (m *MQTT) RegisterDeviceTracker(ctx context.Context, dsc Discovery) error {
 		dt.AvailabilityMode = "all"
 		dt.StateTopic = m.topics.DeviceState(key)
 		dt.JSONAttributesTopic = m.topics.DeviceJSONAttrs(key)
-		dt.ObjectID = deviceID
+		dt.ObjectID = ""
+		dt.DefaultEntityID = "device_tracker." + strings.ReplaceAll(strings.ToLower(dsc.ID)+"_"+sanitizeTopic(m.apName), "-", "_")
 		dt.UniqueID = "wifipresence_" + deviceID
 		dsc.MAC = key
 	}
