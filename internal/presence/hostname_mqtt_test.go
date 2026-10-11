@@ -3,6 +3,7 @@ package presence
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,15 +17,15 @@ func TestHostnameMQTTRotationAndRetainedInventory(t *testing.T) {
 	if *mqttAddr == "" {
 		t.Skip("skipping test; not given mqttAddr")
 	}
-	const oldMAC = "02:00:00:00:00:01"
-	const newMAC = "02:00:00:00:00:02"
+	const oldMAC = "D0:E7:82:CE:1A:18"
+	const newMAC = "AA:41:69:3F:E4:4F"
 	handler := hostapdtest.DefaultHostAPDHandler(hostapdtest.StatusResp{
 		State: "ENABLED", Channel: 42, SSID: "Home", BSSID: "aa:bb:cc:dd:ee:ff",
 	}, []hostapdtest.StationResp{{MAC: oldMAC, Assoc: true}})
 	events := make(chan string)
 	handler.OnAttach(func() <-chan string { return events })
 	source := &hintFixture{hints: map[string]openwrt.HostHint{
-		oldMAC: {Name: "oren-phone"}, newMAC: {Name: "oren-phone"},
+		strings.ToLower(oldMAC): {Name: "oren-phone"}, strings.ToLower(newMAC): {Name: "oren-phone"},
 	}}
 	daemon := newDaemonTestWithOptions(t, []Opt{WithHostSource(source, 20*time.Millisecond), WithDebounce(time.Second)}, handler)
 	state := daemon.subTopic(daemon.topics.DeviceState("id-phone"), true)

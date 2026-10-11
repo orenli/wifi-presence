@@ -164,7 +164,7 @@ func (t *identityTracker) addLocked(hap hap, value string) error {
 }
 
 func (t *identityTracker) enrichLocked(client *hass.InventoryClient) {
-	if hint, exists := t.hints[client.MAC]; exists {
+	if hint, exists := t.hints[strings.ToLower(client.MAC)]; exists {
 		if hint.Name != "" {
 			client.Hostname = hint.Name
 		}

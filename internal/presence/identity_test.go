@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/awilliams/wifi-presence/internal/hass"
+	"github.com/awilliams/wifi-presence/internal/hostapd"
 	"github.com/awilliams/wifi-presence/internal/openwrt"
 )
 
@@ -74,6 +75,29 @@ func identityFixture() (*identityTracker, *identityRecorder) {
 	return &identityTracker{publisher: r, apName: "home", logger: log.New(io.Discard, "", 0),
 		debounce: 10 * time.Second, autodiscovery: true, complete: true,
 		configured: make(map[string]*namedStation), observed: make(map[string]hass.InventoryClient), hints: make(map[string]openwrt.HostHint)}, r
+}
+
+func TestHostapdUppercaseMACJoinsLowercaseHostHints(t *testing.T) {
+	tracker, recorder := identityFixture()
+	tracker.hints["d0:e7:82:ce:1a:18"] = openwrt.HostHint{
+		Name: "oren-phone", IPv4: []string{"192.168.1.42"}, IPv6: []string{"fd00::42"},
+	}
+	// Use the real association path, including the legacy MAC.String formatter,
+	// instead of inserting an already-normalized observation by hand.
+	ap := hap{client: &hostapd.Client{}, status: hostapd.Status{SSID: "Home"}}
+	if err := tracker.addLocked(ap, "d0:e7:82:ce:1a:18"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tracker.configure(context.Background(), []hass.TrackConfig{{ID: "phone", Name: "Phone", Hostname: "oren-phone"}}); err != nil {
+		t.Fatal(err)
+	}
+	if !recorder.states["id-phone"] {
+		t.Fatal("uppercase observation failed to join lowercase resolver key")
+	}
+	client := recorder.inventory.Clients[0]
+	if client.MAC != "D0:E7:82:CE:1A:18" || client.Hostname != "oren-phone" || len(client.IPv4) != 1 || len(client.IPv6) != 1 {
+		t.Fatalf("hostname/IP enrichment failed: %+v", client)
+	}
 }
 
 func TestHostnameDelayedLeaseRotationAndDeparture(t *testing.T) {
